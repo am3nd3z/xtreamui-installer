@@ -73,6 +73,90 @@ _table_has_primary_key() {
 # The panel writes to settings by id and to admin_settings by type. Without
 # primary keys, duplicate rows accumulate and ON DUPLICATE KEY UPDATE cannot
 # work at all.
+# Create the tables the panel needs but its own database.sql does not ship.
+#
+# database.sql defines streams, users, bouquets and the rest, but NOT
+# reg_users (the panel operators) nor admin_settings (the panel's own
+# configuration). Upstream creates those by importing a second file,
+# update_reg_users.py -- which despite the extension is SQL, and which aborts
+# partway through on a syntax error, so even upstream ends up with only some
+# of what it intended.
+#
+# Without reg_users there is nowhere to write the administrator, and the
+# install fails at the last step with no usable panel. These definitions were
+# taken from a working installation, column by column.
+ensure_core_tables() {
+    log_step "Creating the panel's own tables"
+
+    if _table_exists reg_users; then
+        log_info "reg_users already exists."
+    else
+        _schema_exec "
+            CREATE TABLE \`reg_users\` (
+              \`id\`               INT(11)      NOT NULL AUTO_INCREMENT,
+              \`username\`         VARCHAR(50)  NOT NULL,
+              \`password\`         VARCHAR(255) NOT NULL,
+              \`email\`            VARCHAR(255) NOT NULL,
+              \`ip\`               VARCHAR(255)     NULL DEFAULT NULL,
+              \`date_registered\`  INT(11)      NOT NULL,
+              \`verify_key\`       MEDIUMTEXT       NULL DEFAULT NULL,
+              \`last_login\`       INT(11)          NULL DEFAULT NULL,
+              \`member_group_id\`  INT(11)      NOT NULL,
+              \`verified\`         INT(11)      NOT NULL DEFAULT 0,
+              \`credits\`          FLOAT        NOT NULL DEFAULT 0,
+              \`notes\`            MEDIUMTEXT       NULL DEFAULT NULL,
+              \`status\`           TINYINT(2)   NOT NULL DEFAULT 1,
+              \`default_lang\`     MEDIUMTEXT   NOT NULL,
+              \`reseller_dns\`     TEXT         NOT NULL,
+              \`owner_id\`         INT(11)      NOT NULL DEFAULT 0,
+              \`override_packages\` TEXT            NULL DEFAULT NULL,
+              \`google_2fa_sec\`   VARCHAR(50)  NOT NULL,
+              \`dark_mode\`        INT(1)       NOT NULL DEFAULT 0,
+              \`sidebar\`          INT(1)       NOT NULL DEFAULT 0,
+              \`expanded_sidebar\` INT(1)       NOT NULL DEFAULT 0,
+              PRIMARY KEY (\`id\`),
+              KEY \`member_group_id\` (\`member_group_id\`),
+              KEY \`username\` (\`username\`),
+              KEY \`email\` (\`email\`)
+            ) ENGINE=InnoDB AUTO_INCREMENT=1
+              DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
+        " "creating reg_users"
+        _table_exists reg_users && log_ok "reg_users created."
+    fi
+
+    if _table_exists admin_settings; then
+        log_info "admin_settings already exists."
+    else
+        _schema_exec "
+            CREATE TABLE \`admin_settings\` (
+              \`type\`  VARCHAR(128)  NOT NULL DEFAULT '',
+              \`value\` VARCHAR(4096) NOT NULL DEFAULT '',
+              PRIMARY KEY (\`type\`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+        " "creating admin_settings"
+        _table_exists admin_settings && log_ok "admin_settings created."
+    fi
+
+    if _table_exists reg_userlog; then
+        log_info "reg_userlog already exists."
+    else
+        _schema_exec "
+            CREATE TABLE \`reg_userlog\` (
+              \`id\`       INT(11)      NOT NULL AUTO_INCREMENT,
+              \`owner\`    INT(11)      NOT NULL,
+              \`username\` MEDIUMTEXT   NOT NULL,
+              \`password\` MEDIUMTEXT   NOT NULL,
+              \`date\`     INT(30)      NOT NULL,
+              \`type\`     VARCHAR(400) NOT NULL,
+              PRIMARY KEY (\`id\`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
+        " "creating reg_userlog"
+        _table_exists reg_userlog && log_ok "reg_userlog created."
+    fi
+
+    return 0
+}
+
 ensure_primary_keys() {
     log_step "Ensuring primary keys"
 
@@ -410,6 +494,7 @@ verify_schema() {
 }
 
 apply_schema_fixes() {
+    ensure_core_tables
     ensure_primary_keys
     seed_admin_settings
     apply_panel_defaults

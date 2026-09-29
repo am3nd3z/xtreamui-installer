@@ -604,6 +604,15 @@ main() {
     generate_secrets
     size_database
 
+    # Write the credentials the moment they exist, not at the end.
+    #
+    # secure_mariadb_root sets a randomly generated root password early on. If
+    # the run then fails at any later step, that password exists only in this
+    # process -- the log redacts it by design -- and the database becomes
+    # unreachable. Recovering meant reinstalling the whole server. Writing the
+    # file up front keeps a failed run diagnosable and retryable.
+    write_credentials
+
     show_summary
 
     if [[ "$DRY_RUN" == "yes" ]]; then
