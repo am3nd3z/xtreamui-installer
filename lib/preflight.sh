@@ -4,17 +4,36 @@
 # The upstream installer discovered problems halfway through and left the box in
 # a broken half-installed state. Every check that can fail is done here first.
 
+# Read one key out of /etc/os-release without sourcing the file.
+_os_release_field() {
+    local key="$1" value
+    value=$(grep -m1 "^${key}=" /etc/os-release 2>/dev/null | cut -d= -f2-) || true
+    # Values may be quoted with either style, or not at all.
+    value="${value%\"}"; value="${value#\"}"
+    value="${value%\'}"; value="${value#\'}"
+    printf '%s' "$value"
+}
+
 detect_os() {
-    if [[ -f /etc/os-release ]]; then
-        # shellcheck disable=SC1091
-        . /etc/os-release
-        OS_ID="$ID"
-        OS_VERSION="$VERSION_ID"
-        OS_CODENAME="${VERSION_CODENAME:-}"
-        OS_PRETTY="$PRETTY_NAME"
-    else
-        die "Cannot read /etc/os-release. Unsupported system."
-    fi
+    [[ -r /etc/os-release ]] || die "Cannot read /etc/os-release. Unsupported system."
+
+    # Parsed field by field, deliberately not sourced.
+    #
+    # `. /etc/os-release` pulls every assignment in that file into the current
+    # shell, and one of them is VERSION -- which this installer already
+    # declares readonly as its own version number. Sourcing it aborts the run
+    # on the very first preflight check with:
+    #
+    #     /etc/os-release: line 4: VERSION: readonly variable
+    #
+    # Parsing takes only the four keys we need and cannot collide with
+    # anything, now or when a future distribution adds a new field.
+    OS_ID="$(_os_release_field ID)"
+    OS_VERSION="$(_os_release_field VERSION_ID)"
+    OS_CODENAME="$(_os_release_field VERSION_CODENAME)"
+    OS_PRETTY="$(_os_release_field PRETTY_NAME)"
+
+    [[ -n "$OS_ID" ]] || die "Could not determine the distribution from /etc/os-release."
 
     ARCH="$(uname -m)"
     export OS_ID OS_VERSION OS_CODENAME OS_PRETTY ARCH
