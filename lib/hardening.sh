@@ -63,7 +63,10 @@ verify_no_world_writable() {
 
     if (( count > 0 )); then
         log_warn "Found $count world-writable paths under $PANEL_HOME:"
-        find "$PANEL_HOME" -perm -o+w ! -type l 2>/dev/null | head -10
+        # `|| true`: head closes the pipe after ten lines and find takes a
+        # SIGPIPE, which under `set -o pipefail` would abort the install on a
+        # warning.
+        find "$PANEL_HOME" -perm -o+w ! -type l 2>/dev/null | head -10 || true
     else
         log_ok "No world-writable files under $PANEL_HOME."
     fi

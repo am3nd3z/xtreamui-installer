@@ -143,8 +143,26 @@ validate_timezone() {
 # ---------------------------------------------------------------------------
 
 gen_password() {
-    local length="${1:-24}"
-    tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$length"
+    local length="${1:-24}" raw=""
+
+    # Read a bounded chunk and let tr consume all of it.
+    #
+    # The obvious form is fatal here:
+    #
+    #     tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$length"
+    #
+    # /dev/urandom never ends, so tr never finishes on its own. head closes the
+    # pipe once it has its bytes, tr takes a SIGPIPE, and under `set -o
+    # pipefail` the pipeline reports 141 and `set -e` aborts the installer --
+    # every time, on every machine. Reading a fixed amount up front lets tr
+    # exit normally.
+    #
+    # Filtering discards most bytes, so top up until we have enough.
+    while (( ${#raw} < length )); do
+        raw+=$(head -c $(( length * 8 )) /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9') || true
+    done
+
+    printf '%s' "${raw:0:length}"
 }
 
 # ---------------------------------------------------------------------------

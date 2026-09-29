@@ -56,7 +56,9 @@ tar -tzf "$TARBALL" >/dev/null 2>&1 || die "Downloaded file is not a valid tar.g
 
 tar -xzf "$TARBALL" -C "$WORKDIR" || die "Could not extract the archive."
 
-SRC="$(find "$WORKDIR" -maxdepth 1 -mindepth 1 -type d | head -1)"
+# `|| true`: head can close the pipe before find is done, and pipefail would
+# turn that SIGPIPE into an aborted bootstrap.
+SRC="$(find "$WORKDIR" -maxdepth 1 -mindepth 1 -type d | head -1)" || true
 [[ -n "$SRC" && -f "${SRC}/install.sh" ]] || die "install.sh not found in the archive."
 
 chmod +x "${SRC}/install.sh" "${SRC}"/tools/*.sh 2>/dev/null || true
