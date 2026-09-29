@@ -78,8 +78,19 @@ check_conflicting_panels() {
     )
     local panel
     for panel in "${panels[@]}"; do
-        [[ -e "$panel" ]] && die "Another control panel is installed ($panel). Install on a clean system."
+        if [[ -e "$panel" ]]; then
+            die "Another control panel is installed ($panel). Install on a clean system."
+        fi
     done
+
+    # The explicit return is what makes this safe under `set -e`.
+    #
+    # Written as `[[ -e "$panel" ]] && die ...`, the loop's exit status is that
+    # of its final iteration. On a clean server the last path does not exist,
+    # the && short-circuits, the loop returns 1, the function returns 1, and
+    # the caller dies -- reporting a conflicting control panel that is not
+    # there. A whole install aborted on a check that had just passed.
+    return 0
 }
 
 check_resources() {
