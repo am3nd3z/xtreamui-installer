@@ -1,0 +1,165 @@
+# xtreamui-installer configuration
+#
+#   cp xtreamui.conf.example xtreamui.conf
+#   chmod 600 xtreamui.conf
+#   sudo ./install.sh --config xtreamui.conf
+#
+# xtreamui.conf is in .gitignore. Never commit a file that holds passwords.
+
+# --- Ports -----------------------------------------------------------------
+# Valid range is 1-65535. Anything outside it is rejected before install.
+# (The upstream installer accepted 80910 and produced a server where nginx
+#  refused to load its config at all.)
+
+ADMIN_PORT=8091
+CLIENT_PORT=8080
+
+# Default to CLIENT_PORT+1 and CLIENT_PORT+2 when left unset.
+# RTMP_PORT=8081
+# CLIENT_HTTPS_PORT=8082
+
+# MariaDB. Bound to 127.0.0.1 unless DB_REMOTE_CIDR is set.
+MYSQL_PORT=7999
+
+# --- Administrator ---------------------------------------------------------
+
+ADMIN_USER=admin
+ADMIN_EMAIL=you@example.com
+
+# Leave passwords empty to have strong ones generated for you.
+# ADMIN_PASS=
+# MYSQL_ROOT_PASS=
+# DB_PASS=
+
+# --- Locale and network ----------------------------------------------------
+
+TIMEZONE=Europe/Madrid
+
+# Idioma y locale del panel. El instalador original fija pt_PT.utf8 en todas
+# las instalaciones, sin preguntar.
+PANEL_LANG=es
+PANEL_LOCALE=es_ES.utf8
+
+# Autodetected across four providers when empty.
+# PUBLIC_IP=
+# PANEL_DOMAIN=panel.example.com
+
+# --- Payload ---------------------------------------------------------------
+#
+# The archive with the precompiled binaries and the panel source.
+#
+# Host your own copy. Pointing this at someone else's release means whatever
+# they publish tomorrow is what your server runs tomorrow.
+
+PANEL_TARBALL_URL=https://your-host.example.com/xui-ubuntu-22.04.tar.gz
+
+# Pin the checksum. Get it once from an archive you have inspected:
+#   sha256sum xui-ubuntu-22.04.tar.gz
+#
+# With this set, the installer refuses to proceed if the bytes ever change.
+PANEL_TARBALL_SHA256=
+
+# Optional extras.
+# PANEL_UPDATE_URL=
+# PANEL_UPDATE_SHA256=
+# GEOLITE_URL=
+
+# --- Security --------------------------------------------------------------
+
+# Configure ufw. SSH is always allowed before the firewall is enabled.
+ENABLE_FIREWALL=yes
+
+# Restrict the admin panel to one address. Strongly recommended -- it is the
+# highest-value target on the box.
+# ADMIN_ALLOW_IP=203.0.113.10
+
+# Let the panel block abusive client IPs via sudo iptables.
+# Grants xtreamcodes NOPASSWD sudo on iptables and chattr only. Never on an
+# interpreter: python with NOPASSWD sudo is a root shell for the web user.
+ALLOW_IPTABLES_CONTROL=no
+
+# Open MariaDB to a load balancer at this address only. Leave empty to keep
+# the database on loopback, which is what you want for a single server.
+# DB_REMOTE_CIDR=198.51.100.20
+
+ENABLE_HTTPS=yes
+
+# --- ffmpeg ----------------------------------------------------------------
+#
+# The panel ships an ffmpeg built in 2018 against glibc 2.31. On Ubuntu 22.04+
+# and Debian 12 (glibc 2.34+, where libpthread moved into libc) it segfaults on
+# any real work -- while `ffmpeg -version` still succeeds, which makes it look
+# healthy to any check that does not actually encode something.
+#
+#   auto    test the bundled binary with a real encode, fall back if it fails
+#   system  always use the distribution ffmpeg
+#   bundled trust the panel's binary untested (not recommended)
+FFMPEG_MODE=auto
+
+# Where the replacement comes from.
+#
+#   distro  Ubuntu/Debian's own package: signed, updated by apt
+#   static  a statically linked build -- this is exactly what upstream ships as
+#           ffmpeg_v5.0.1_amd64.zip, which turns out to be John Van Sickle's
+#           generic static build rather than a custom Xtream compile. Newer,
+#           immune to the glibc problem, and carries nonfree encoders such as
+#           libfdk-aac, but unsigned and outside apt.
+#
+# Neither supports the panel's custom '+delete' muxer flag -- verified against
+# both -- so the wrapper is installed either way.
+FFMPEG_SOURCE=distro
+# FFMPEG_STATIC_SHA256=
+
+# How long to keep HLS segments on disk, in minutes.
+#
+# The panel's custom ffmpeg had a '+delete' flag on the segment muxer that
+# removed segments as they left the playlist. Stock ffmpeg has no such flag,
+# so without this cleanup the streams tmpfs grows by roughly 14 MB per minute
+# per stream and eventually kills every stream on the box.
+#
+# The playing window is segment_time x segment_list_size, about 60 seconds by
+# default. 3 minutes leaves a wide margin.
+SEGMENT_MAX_AGE_MIN=3
+
+# --- Marca del panel -------------------------------------------------------
+#
+# Aplica un tema a la página de login y quita el icono de la pestaña.
+# El tema se instala como admin/assets/css/xtreamui-brand.css, no incrustado
+# en el PHP: se puede editar después sin tocar código.
+
+BRANDING_ENABLED=yes
+
+# Nombre del panel. Con dos palabras, la segunda sale en el color de acento:
+# "Pato Player" -> "Pato" en blanco, "Player" en naranja.
+BRAND_NAME=Pato Player
+
+# Quita el icono de la pestaña en el login y en el dashboard.
+# Usa un data URI vacío: borrar la etiqueta sin más haría que el navegador
+# pidiera /favicon.ico, que existe en el panel y volvería igual.
+BRAND_HIDE_FAVICON=yes
+
+# Cualquier familia de Google Fonts.
+BRAND_FONT_DISPLAY=Oswald
+BRAND_FONT_BODY=Barlow
+
+BRAND_BG_TOP=#1c1008
+BRAND_BG_MID=#2a1a0d
+BRAND_WEDGE=#4a2c0c
+BRAND_ACCENT=#F5A03C
+BRAND_ACCENT_DEEP=#E07B1E
+BRAND_MUTED=#B3A296
+BRAND_PANEL=#251609
+BRAND_FIELD=#14100b
+
+# --- Tuning ----------------------------------------------------------------
+# Buffer pool and connection limits are sized from the host's RAM.
+
+TMPFS_STREAMS_SIZE=60%
+TMPFS_TMP_SIZE=2G
+
+RATE_LIMIT=20
+RATE_BURST=8
+
+# The default of 1024 open files runs out fast once several streams are live.
+PANEL_NOFILE=300000
+PANEL_NPROC=65535

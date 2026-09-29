@@ -1,0 +1,26 @@
+# Los scripts DEBEN ir con finales de linea LF.
+#
+# Sin esto, un clon en Windows con core.autocrlf=true convierte a CRLF y los
+# scripts fallan en Linux con un error que no dice nada util:
+#
+#     /bin/bash^M: bad interpreter: No such file or directory
+#
+# El repo se edito en Windows, asi que este fichero no es teorico.
+* text=auto eol=lf
+
+*.sh              text eol=lf
+*.template        text eol=lf
+*.css             text eol=lf
+*.md              text eol=lf
+*.example         text eol=lf
+.gitignore        text eol=lf
+.gitattributes    text eol=lf
+
+# Binarios, por si algun dia se anaden
+*.png    binary
+*.jpg    binary
+*.ico    binary
+*.gz     binary
+*.zip    binary
+*.deb    binary
+*.mmdb   binary

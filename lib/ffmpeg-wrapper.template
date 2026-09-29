@@ -1,0 +1,162 @@
+#!/bin/bash
+#
+# ffmpeg compatibility wrapper, installed by xtreamui-installer.
+#
+# The panel builds command lines for the custom ffmpeg it used to ship. That
+# binary segfaults on modern glibc and was replaced with a stock build, which
+# does not implement two of the options the panel passes.
+#
+# Configuration lives in /etc/xtreamui-ffmpeg.conf so the mode can be changed
+# without reinstalling. Restart the panel after editing it.
+
+REAL="__REAL_FFMPEG__"
+CONF=/etc/xtreamui-ffmpeg.conf
+LOG=/var/log/xtream-ffmpeg-args.log
+
+SEGMENT_MODE=legacy
+HLS_DELETE_THRESHOLD=6
+# temp_file is deliberately NOT in the default set. It makes ffmpeg write each
+# segment as .tmp and rename it on completion, which is ideal for an HTTP
+# client but breaks the panel's MPEGTS path: that reads the segment files
+# directly from disk, and while a segment exists only as .tmp the reader sees
+# no next file, decides the stream ended, and closes the connection cleanly.
+# The symptom is playback stopping after a few segments with no error anywhere.
+HLS_FLAGS="delete_segments"
+[[ -r "$CONF" ]] && . "$CONF"
+
+args=()
+
+# ---------------------------------------------------------------------------
+# Pass 1: option-for-option translation
+# ---------------------------------------------------------------------------
+#
+#   segment_list_flags +live+delete   'delete' was a custom flag in the panel's
+#                                     own build; no stock ffmpeg has it, and the
+#                                     whole option is rejected, so the muxer
+#                                     never initialises and the stream dies.
+#   -user-agent                       renamed to -user_agent upstream.
+
+for a in "$@"; do
+    case "$a" in
+        "+live+delete"|"+delete+live") args+=("+live") ;;
+        "-user-agent")                 args+=("-user_agent") ;;
+        *)                             args+=("$a") ;;
+    esac
+done
+
+# ---------------------------------------------------------------------------
+# Pass 2 (SEGMENT_MODE=hls): rewrite the segment muxer as the HLS muxer
+# ---------------------------------------------------------------------------
+#
+# Why bother, when dropping '+delete' already makes the stream run:
+#
+#   * delete_segments removes segments as they leave the playlist window. The
+#     legacy path needs a cron sweeping the directory instead, because the
+#     segment muxer has no deletion of its own. Without either, the streams
+#     tmpfs grows by roughly 14 MB per minute per stream.
+#   * temp_file writes each segment to .tmp and renames it on completion, so a
+#     client can never fetch a half-written segment. That is a real playback
+#     improvement, not just tidier disk usage.
+#
+# What the panel passes:
+#
+#   -f segment -segment_format mpegts -segment_time 10 -segment_list_size 6
+#   -segment_format_options mpegts_flags=+initial_discontinuity:mpegts_copyts=1
+#   -segment_list_type m3u8 -segment_list_flags +live
+#   -segment_list /…/streams/1_.m3u8  /…/streams/1_%d.ts
+#
+# and what it becomes:
+#
+#   -f hls -hls_time 10 -hls_list_size 6
+#   -hls_flags delete_segments+temp_file -hls_delete_threshold 6
+#   -hls_segment_type mpegts
+#   -hls_segment_filename /…/streams/1_%d.ts  /…/streams/1_.m3u8
+#
+# independent_segments is deliberately left out: it pushes the playlist to
+# EXT-X-VERSION:6, and the panel's PHP parses a version 3 playlist today.
+# Without it the output is byte-compatible with what the panel expects.
+#
+# hls_delete_threshold keeps segments for that many windows past the playlist.
+# It matters because the panel serves MPEGTS by reading these same segment
+# files: at list_size 6 and 10s segments, the default threshold of 1 leaves a
+# TS client barely a minute of slack before it reads a file that is gone.
+
+if [[ "$SEGMENT_MODE" == "hls" ]]; then
+    is_segment_muxer=no
+    playlist=""
+    for ((i = 0; i < ${#args[@]}; i++)); do
+        if [[ "${args[i]}" == "-f" && "${args[i+1]}" == "segment" ]]; then
+            is_segment_muxer=yes
+        fi
+        if [[ "${args[i]}" == "-segment_list" ]]; then
+            playlist="${args[i+1]}"
+        fi
+    done
+
+    # Only rewrite a complete segment-muxer invocation. Anything else — VOD,
+    # probing, a movie restream — passes through untouched.
+    if [[ "$is_segment_muxer" == "yes" && -n "$playlist" ]]; then
+        out=()
+        skip=0
+        for ((i = 0; i < ${#args[@]}; i++)); do
+            if (( skip > 0 )); then skip=$((skip - 1)); continue; fi
+            case "${args[i]}" in
+                -f)
+                    if [[ "${args[i+1]}" == "segment" ]]; then
+                        out+=("-f" "hls"); skip=1
+                    else
+                        out+=("${args[i]}")
+                    fi
+                    ;;
+                -segment_time)       out+=("-hls_time" "${args[i+1]}"); skip=1 ;;
+                -segment_list_size)  out+=("-hls_list_size" "${args[i+1]}"); skip=1 ;;
+                -segment_format)     out+=("-hls_segment_type" "${args[i+1]}"); skip=1 ;;
+                # No equivalent, or handled by the hls muxer itself.
+                -segment_list_type|-segment_list_flags|-segment_format_options|\
+                -segment_list|-individual_header_trailer)
+                    skip=1 ;;
+                *)
+                    out+=("${args[i]}") ;;
+            esac
+        done
+
+        # The final positional argument is the segment filename pattern. Under
+        # the hls muxer that becomes -hls_segment_filename, and the playlist
+        # takes its place as the output.
+        last_index=$(( ${#out[@]} - 1 ))
+        pattern="${out[last_index]}"
+        unset 'out[last_index]'
+
+        out+=("-hls_flags" "${HLS_FLAGS}")
+        out+=("-hls_delete_threshold" "${HLS_DELETE_THRESHOLD}")
+        out+=("-hls_segment_filename" "$pattern")
+        out+=("$playlist")
+
+        args=("${out[@]}")
+    fi
+fi
+
+# Record the first command seen, for diagnosing options not covered here.
+if [[ ! -s "$LOG" ]] 2>/dev/null; then
+    { printf '%s MODE:       %s\n' "$(date '+%F %T')" "$SEGMENT_MODE"
+      printf '%s ORIGINAL:   %s\n' "$(date '+%F %T')" "$*"
+      printf '%s TRANSLATED: %s\n' "$(date '+%F %T')" "${args[*]}"
+    } >>"$LOG" 2>/dev/null
+fi
+
+# exec -a "$0" is load-bearing, not cosmetic.
+#
+# The panel counts its running streams by matching process command lines
+# against its own ffmpeg path. A plain `exec "$REAL"` replaces the process
+# image, so ps shows /usr/bin/ffmpeg and the panel counts zero streams running.
+# users_checker.php then treats every client connection as orphaned and runs
+#
+#     DELETE FROM user_activity_now WHERE activity_id = '<id>'
+#
+# which drops the connection. The client sees playback stop after a few tens of
+# seconds with a clean EOF -- no error in any log, and the connection vanishing
+# from Live Connections.
+#
+# Setting argv[0] back to the wrapper's own path keeps the process recognisable
+# to the panel while still running the replacement binary.
+exec -a "$0" "$REAL" "${args[@]}"

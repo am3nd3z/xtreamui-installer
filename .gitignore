@@ -1,0 +1,30 @@
+# Config con credenciales reales — NUNCA subir
+xtreamui.conf
+*.conf.local
+credentials.txt
+*-credentials.txt
+
+# Logs
+*.log
+logs/
+
+# Payloads descargados
+*.tar.gz
+*.zip
+*.mmdb
+*.deb
+
+# Certificados y claves
+*.key
+*.crt
+*.pem
+
+# Backups generados por los scripts
+*.bak
+*.bak-*
+
+# Basura del sistema
+.DS_Store
+Thumbs.db
+*.swp
+*~
