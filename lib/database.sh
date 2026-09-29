@@ -141,16 +141,41 @@ EOF
 secure_mariadb_root() {
     log_step "Securing the MariaDB root account"
 
-    # On a fresh install root uses unix_socket auth, so this first call needs no
-    # password. Once set, every later call goes through mysql_exec.
-    mysql -u root --socket=/var/run/mysqld/mysqld.sock -e "
+    [[ -n "${MYSQL_SOCKET:-}" ]] || MYSQL_SOCKET=$(detect_mysql_socket)
+
+    local sql="
         ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASS}';
         DELETE FROM mysql.user WHERE User='';
         DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost','127.0.0.1','::1');
         DROP DATABASE IF EXISTS test;
         DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
         FLUSH PRIVILEGES;
-    " 2>/dev/null || die "Could not set the MariaDB root password."
+    "
+
+    # Two ways in, because this has to work on a re-run as well.
+    #
+    # On a fresh MariaDB, root authenticates over the unix socket with no
+    # password. After one run of this installer it has a generated one, so a
+    # socket-only attempt fails and --force could never reinstall over a
+    # partial install -- the only way out was reformatting the server.
+    if mysql -u root --socket="$MYSQL_SOCKET" -e "SELECT 1;" >/dev/null 2>&1; then
+        mysql -u root --socket="$MYSQL_SOCKET" -e "$sql" 2>/dev/null \
+            || die "Could not set the MariaDB root password."
+    elif [[ -f "$CREDENTIALS_FILE" ]] \
+         && grep -q 'MariaDB root' "$CREDENTIALS_FILE" 2>/dev/null; then
+        local previous
+        previous=$(grep -oP 'MariaDB root\s+\K\S+' "$CREDENTIALS_FILE") || true
+        if [[ -n "$previous" ]] \
+           && mysql -u root -p"$previous" --socket="$MYSQL_SOCKET" -e "SELECT 1;" >/dev/null 2>&1; then
+            log_info "Reusing the root password from a previous run to re-secure the account."
+            mysql -u root -p"$previous" --socket="$MYSQL_SOCKET" -e "$sql" 2>/dev/null \
+                || die "Could not reset the MariaDB root password."
+        else
+            die "MariaDB root already has a password this installer does not know. Reinstall MariaDB or start from a clean system."
+        fi
+    else
+        die "Cannot authenticate to MariaDB as root. Reinstall MariaDB or start from a clean system."
+    fi
 
     log_ok "Root password set, anonymous users and test database removed."
 }
@@ -288,26 +313,66 @@ print(crypt.crypt(sys.argv[1], '\$6\$rounds=20000\$xtreamcodes'))
 
     [[ -n "$hash" ]] || die "Could not hash the administrator password."
 
-    # The full 21-column reg_users schema, verified against a real install.
+    # Build the INSERT from the columns reg_users actually has.
     #
-    # Columns that must not be omitted: default_lang, reseller_dns and
-    # google_2fa_sec are NOT NULL with no default, and verified must be 1 or the
-    # account cannot log in. An INSERT that leaves them out either fails outright
-    # under strict SQL mode or, under the panel's own NO_ENGINE_SUBSTITUTION
-    # mode, silently creates an account that does not work.
-    mysql_exec "
+    # This table comes in two shapes. The panel's own database.sql ships 18
+    # columns, ending at google_2fa_sec. Upstream's separate update_reg_users.py
+    # drops that table and recreates it with three more -- dark_mode, sidebar
+    # and expanded_sidebar -- so a server that ran the old installer looks
+    # different from a fresh deployment of the same archive.
+    #
+    # A fixed column list works on exactly one of them and fails on the other
+    # with "Unknown column 'dark_mode'", at the last step of the install.
+    # Asking the database what it has works on both, and on whatever a future
+    # build ships.
+    local present
+    present=$(mysql_exec "
+        SELECT COLUMN_NAME FROM information_schema.columns
+        WHERE table_schema = '${DB_NAME}' AND table_name = 'reg_users';
+    " "$DB_NAME") || die "Could not read the reg_users schema."
+
+    local -A want=(
+        [id]="1"
+        [username]="'${ADMIN_USER}'"
+        [password]="'${hash}'"
+        [email]="'${ADMIN_EMAIL}'"
+        [ip]="NULL"
+        [date_registered]="UNIX_TIMESTAMP()"
+        [verify_key]="NULL"
+        [last_login]="NULL"
+        [member_group_id]="1"
+        [verified]="1"
+        [credits]="0"
+        [notes]="NULL"
+        [status]="1"
+        [default_lang]="'${PANEL_LANG}'"
+        [reseller_dns]="''"
+        [owner_id]="0"
+        [override_packages]="NULL"
+        [google_2fa_sec]="''"
+        [dark_mode]="0"
+        [sidebar]="0"
+        [expanded_sidebar]="0"
+    )
+
+    local cols="" vals="" col
+    while read -r col; do
+        [[ -n "$col" && -n "${want[$col]:-}" ]] || continue
+        cols+="${cols:+, }\`${col}\`"
+        vals+="${vals:+, }${want[$col]}"
+    done <<<"$present"
+
+    [[ -n "$cols" ]] || die "reg_users has none of the expected columns."
+
+    local out
+    out=$(mysql_exec "
         DELETE FROM reg_users WHERE id = 1;
-        INSERT INTO reg_users
-            (id, username, password, email, ip, date_registered, verify_key,
-             last_login, member_group_id, verified, credits, notes, status,
-             default_lang, reseller_dns, owner_id, override_packages,
-             google_2fa_sec, dark_mode, sidebar, expanded_sidebar)
-        VALUES
-            (1, '${ADMIN_USER}', '${hash}', '${ADMIN_EMAIL}', NULL, UNIX_TIMESTAMP(), NULL,
-             NULL, 1, 1, 0, NULL, 1,
-             '${PANEL_LANG}', '', 0, NULL,
-             '', 0, 0, 0);
-    " "$DB_NAME" >/dev/null || die "Could not create the administrator account."
+        INSERT INTO reg_users (${cols}) VALUES (${vals});
+    " "$DB_NAME") || {
+        # Show what the server said rather than a bare failure.
+        printf '%s\n' "$out" | grep -iE 'error' | head -3 | sed 's/^/    /' >&2 || true
+        die "Could not create the administrator account."
+    }
 
     # Confirm it landed, and that it is usable rather than merely present.
     local check

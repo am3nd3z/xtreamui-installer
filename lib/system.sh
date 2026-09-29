@@ -116,6 +116,11 @@ install_legacy_openssl() {
         dpkg -i "$deb_path" >/dev/null 2>&1 || apt-get install -f -y -qq
         rm -f "$deb_path"
 
+        # Refresh the cache before checking it. dpkg normally runs ldconfig
+        # itself, but not reliably within the same moment we query it, and a
+        # stale cache made a successful install report as a failure.
+        ldconfig 2>/dev/null || true
+
         if ldconfig -p | grep -q 'libssl\.so\.1\.1'; then
             log_ok "libssl1.1 installed."
         else
