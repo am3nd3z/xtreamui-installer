@@ -25,13 +25,30 @@
 # Run a statement and fail loudly. Unlike the upstream import, nothing here is
 # allowed to fail quietly.
 _schema_exec() {
-    local sql="$1" description="$2"
+    local sql="$1" description="$2" out rc=0
 
-    if ! mysql_exec "$sql" "$DB_NAME" >/dev/null 2>&1; then
+    out=$(mysql_exec "$sql" "$DB_NAME") || rc=$?
+
+    if (( rc != 0 )); then
+        # Show what the server actually said.
+        #
+        # This used to discard both streams with >/dev/null 2>&1, which made
+        # every schema failure look identical: a bare "step failed" with no way
+        # to tell a missing table from a syntax error from a permissions
+        # problem. Debugging it meant reproducing the SQL by hand.
         log_warn "Schema step failed: ${description}"
-        return 1
+        printf '%s\n' "$out" | grep -iE 'error|denied' | head -3 | sed 's/^/        /' || true
     fi
+
+    # Always 0: these steps warn and continue by design, and returning non-zero
+    # from a bare call aborts the installer under `set -e`.
     return 0
+}
+
+_table_exists() {
+    local table="$1" out
+    out=$(mysql_exec "SHOW TABLES LIKE '${table}';" "$DB_NAME") || return 1
+    [[ "$out" == *"$table"* ]]
 }
 
 # mysql_exec prints the server's error text to stdout as well as returning a
@@ -59,17 +76,38 @@ _table_has_primary_key() {
 ensure_primary_keys() {
     log_step "Ensuring primary keys"
 
-    if _table_has_primary_key settings; then
+    if ! _table_exists settings; then
+        log_warn "The settings table does not exist; the schema import was incomplete."
+    elif _table_has_primary_key settings; then
         log_info "settings already has a primary key."
     else
-        _schema_exec "ALTER TABLE settings ADD PRIMARY KEY(id);" "settings primary key" \
-            && log_ok "Added primary key on settings.id"
+        _schema_exec "ALTER TABLE settings ADD PRIMARY KEY(id);" "settings primary key"
+        _table_has_primary_key settings && log_ok "Added primary key on settings.id"
+    fi
+
+    if ! _table_exists admin_settings; then
+        # Checked before touching it: _table_has_primary_key cannot tell
+        # "no key" apart from "no table", so without this the code would fall
+        # through to deduplicating a table that is not there.
+        log_warn "The admin_settings table does not exist; the schema import was incomplete."
+        return 0
     fi
 
     if _table_has_primary_key admin_settings; then
         log_info "admin_settings already has a primary key."
-    else
-        # Collapse any duplicates first, or adding the key fails.
+        return 0
+    fi
+
+    # Collapse duplicate type values first, or adding the key fails. Only
+    # worth doing when there are any.
+    local dupes
+    dupes=$(_query_scalar "
+        SELECT COUNT(*) FROM (
+            SELECT type FROM admin_settings GROUP BY type HAVING COUNT(*) > 1
+        ) d;") || true
+
+    if [[ -n "$dupes" && "$dupes" != "0" ]]; then
+        log_info "Collapsing ${dupes} duplicated admin_settings key(s)."
         _schema_exec "
             CREATE TEMPORARY TABLE _as_dedup AS
                 SELECT type, MAX(value) AS value FROM admin_settings GROUP BY type;
@@ -77,10 +115,12 @@ ensure_primary_keys() {
             INSERT INTO admin_settings (type, value) SELECT type, value FROM _as_dedup;
             DROP TEMPORARY TABLE _as_dedup;
         " "admin_settings deduplication"
-
-        _schema_exec "ALTER TABLE admin_settings ADD PRIMARY KEY(type);" "admin_settings primary key" \
-            && log_ok "Added primary key on admin_settings.type"
     fi
+
+    _schema_exec "ALTER TABLE admin_settings ADD PRIMARY KEY(type);" "admin_settings primary key"
+    _table_has_primary_key admin_settings && log_ok "Added primary key on admin_settings.type"
+
+    return 0
 }
 
 # The rows the panel reads at runtime. Missing ones make the admin UI behave as
