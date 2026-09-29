@@ -161,18 +161,14 @@ secure_mariadb_root() {
     if mysql -u root --socket="$MYSQL_SOCKET" -e "SELECT 1;" >/dev/null 2>&1; then
         mysql -u root --socket="$MYSQL_SOCKET" -e "$sql" 2>/dev/null \
             || die "Could not set the MariaDB root password."
-    elif [[ -f "$CREDENTIALS_FILE" ]] \
-         && grep -q 'MariaDB root' "$CREDENTIALS_FILE" 2>/dev/null; then
-        local previous
-        previous=$(grep -oP 'MariaDB root\s+\K\S+' "$CREDENTIALS_FILE") || true
-        if [[ -n "$previous" ]] \
-           && mysql -u root -p"$previous" --socket="$MYSQL_SOCKET" -e "SELECT 1;" >/dev/null 2>&1; then
-            log_info "Reusing the root password from a previous run to re-secure the account."
-            mysql -u root -p"$previous" --socket="$MYSQL_SOCKET" -e "$sql" 2>/dev/null \
-                || die "Could not reset the MariaDB root password."
-        else
-            die "MariaDB root already has a password this installer does not know. Reinstall MariaDB or start from a clean system."
-        fi
+    elif [[ -n "${PREVIOUS_ROOT_PASS:-}" ]] \
+         && mysql -u root -p"$PREVIOUS_ROOT_PASS" --socket="$MYSQL_SOCKET" \
+                  -e "SELECT 1;" >/dev/null 2>&1; then
+        # Captured in main() before write_credentials overwrote the file with
+        # this run's freshly generated password.
+        log_info "Reusing the previous run's root password to re-secure the account."
+        mysql -u root -p"$PREVIOUS_ROOT_PASS" --socket="$MYSQL_SOCKET" -e "$sql" 2>/dev/null \
+            || die "Could not reset the MariaDB root password."
     else
         die "Cannot authenticate to MariaDB as root. Reinstall MariaDB or start from a clean system."
     fi

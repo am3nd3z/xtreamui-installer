@@ -604,6 +604,19 @@ main() {
     generate_secrets
     size_database
 
+    # Remember the previous run's root password before overwriting the file.
+    #
+    # Order matters here. write_credentials runs early (see below), so by the
+    # time secure_mariadb_root needs the OLD password to re-secure an existing
+    # MariaDB, the file already holds the NEW one -- which has not been applied
+    # yet. Reading it there finds a password that does not work and the re-run
+    # dies claiming the account is unknown to us.
+    PREVIOUS_ROOT_PASS=""
+    if [[ -f "$CREDENTIALS_FILE" ]]; then
+        PREVIOUS_ROOT_PASS=$(grep -oP 'MariaDB root\s+\K\S+' "$CREDENTIALS_FILE" 2>/dev/null) || true
+        [[ -n "$PREVIOUS_ROOT_PASS" ]] && register_secret "$PREVIOUS_ROOT_PASS"
+    fi
+
     # Write the credentials the moment they exist, not at the end.
     #
     # secure_mariadb_root sets a randomly generated root password early on. If
