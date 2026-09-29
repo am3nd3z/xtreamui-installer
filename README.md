@@ -4,6 +4,14 @@ Instalador limpio para el panel IPTV Xtream UI, sobre Ubuntu 20.04/22.04/24.04 y
 
 Reescritura del instalador que circula habitualmente, corrigiendo los fallos de seguridad y los bugs que dejan la instalación rota.
 
+> ### ⚠️ Pre-release — sin probar de principio a fin
+>
+> Cada corrección de este repositorio se verificó **sobre una instalación real y en marcha**: se reprodujo el fallo, se aplicó el arreglo y se comprobó el resultado. Los 18 scripts pasan validación de sintaxis en Ubuntu 22.04.
+>
+> Lo que **no** se ha hecho todavía es ejecutar `install.sh` completo en un servidor limpio, de cero a panel funcionando.
+>
+> Úsalo en una máquina desechable primero. Si lo pruebas en una instalación nueva, abre un issue con el resultado: es justo lo que falta para quitar este aviso.
+
 ---
 
 ## Antes de nada: qué es y qué no es esto
@@ -61,8 +69,36 @@ Si necesitas garantías sobre el código del panel, este instalador no te las da
 
 ## Instalación
 
+### Un solo comando
+
 ```bash
-git clone https://github.com/TU_USUARIO/xtreamui-installer.git
+curl -fsSL https://raw.githubusercontent.com/am3nd3z/xtreamui-installer/main/bootstrap.sh \
+  | sudo bash -s -- \
+      --admin-port 8091 \
+      --client-port 8080 \
+      --admin-user admin \
+      --email tu@correo.com \
+      --timezone America/Mexico_City \
+      --tarball-url https://tu-host/xui-ubuntu-22.04.tar.gz \
+      --tarball-sha256 abc123... \
+      --enable-firewall \
+      --yes
+```
+
+`bootstrap.sh` descarga el repositorio completo y lanza `install.sh`. Hace falta porque `install.sh` carga `lib/*.sh` respecto a su propia ubicación, y por una tubería `${BASH_SOURCE[0]}` vale `stdin`.
+
+Para fijar una versión concreta en lugar de seguir `main`:
+
+```bash
+curl -fsSL .../bootstrap.sh | sudo XUI_REF=v0.9.0 bash -s -- ...
+```
+
+> Con el one-liner, `--yes` es obligatorio salvo que haya terminal disponible: al venir por tubería, las confirmaciones leerían EOF. El bootstrap lo detecta y avisa antes de empezar, en vez de fallar a mitad.
+
+### Clonando el repositorio
+
+```bash
+git clone https://github.com/am3nd3z/xtreamui-installer.git
 cd xtreamui-installer
 chmod +x install.sh tools/*.sh
 ```
