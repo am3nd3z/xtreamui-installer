@@ -51,13 +51,17 @@ PANEL_LOCALE=es_ES.utf8
 # Host your own copy. Pointing this at someone else's release means whatever
 # they publish tomorrow is what your server runs tomorrow.
 
-PANEL_TARBALL_URL=https://your-host.example.com/xui-ubuntu-22.04.tar.gz
+PANEL_TARBALL_URL=https://github.com/am3nd3z/xtreamui-installer/releases/download/v0.9.0-beta/main_xui_Ubuntu_22.04.tar.gz
 
-# Pin the checksum. Get it once from an archive you have inspected:
-#   sha256sum xui-ubuntu-22.04.tar.gz
+# Huella del fichero anterior. Con esto puesto, el instalador se niega a
+# continuar si los bytes cambian alguna vez.
 #
-# With this set, the installer refuses to proceed if the bytes ever change.
-PANEL_TARBALL_SHA256=
+#   sha256sum main_xui_Ubuntu_22.04.tar.gz
+#
+# Garantiza que el fichero es el mismo entre instalaciones. NO garantiza que
+# su contenido sea seguro: son binarios precompilados y PHP ofuscado que
+# nadie ha auditado.
+PANEL_TARBALL_SHA256=57bdb3916d74a7d7417b6469e968766ddc46d86d195af4b03091cad7b66e2dd8
 
 # Optional extras.
 # PANEL_UPDATE_URL=

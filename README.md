@@ -79,11 +79,24 @@ curl -fsSL https://raw.githubusercontent.com/am3nd3z/xtreamui-installer/main/boo
       --admin-user admin \
       --email tu@correo.com \
       --timezone America/Mexico_City \
-      --tarball-url https://tu-host/xui-ubuntu-22.04.tar.gz \
-      --tarball-sha256 abc123... \
+      --tarball-url https://github.com/am3nd3z/xtreamui-installer/releases/download/v0.9.0-beta/main_xui_Ubuntu_22.04.tar.gz \
+      --tarball-sha256 57bdb3916d74a7d7417b6469e968766ddc46d86d195af4b03091cad7b66e2dd8 \
       --enable-firewall \
       --yes
 ```
+
+### El payload del panel
+
+El archivo que despliega el instalador está publicado en las [releases](https://github.com/am3nd3z/xtreamui-installer/releases) de este mismo repositorio, para no depender de terceros:
+
+```
+main_xui_Ubuntu_22.04.tar.gz     387 MB
+SHA256  57bdb3916d74a7d7417b6469e968766ddc46d86d195af4b03091cad7b66e2dd8
+```
+
+Pasar `--tarball-sha256` es lo que hace que el instalador **se niegue a continuar si los bytes cambian**. Garantiza reproducibilidad entre instalaciones; no garantiza que el contenido sea seguro — son binarios precompilados y PHP ofuscado que nadie ha auditado.
+
+> Pese al nombre, el fichero **no está comprimido**: es un tar plano. Sus primeros bytes son `69 70 74` —el comienzo de `iptv_xtream_codes/` en la cabecera tar— en lugar de la firma gzip `1F 8B`. Se conservan el nombre y los bytes originales para que la huella coincida con el payload en uso. `lib/panel.sh` extrae con `tar -xf` sin forzar `-z`, así que GNU tar autodetecta el formato.
 
 `bootstrap.sh` descarga el repositorio completo y lanza `install.sh`. Hace falta porque `install.sh` carga `lib/*.sh` respecto a su propia ubicación, y por una tubería `${BASH_SOURCE[0]}` vale `stdin`.
 
